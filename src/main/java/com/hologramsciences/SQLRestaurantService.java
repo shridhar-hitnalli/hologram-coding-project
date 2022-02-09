@@ -45,18 +45,23 @@ public class SQLRestaurantService {
         final String previousDayOfWeekString = previousDayOfWeek.toString();
 
 
-        final Integer minuteOfDay    = localTime.get(MINUTE_OF_DAY);
+        final Integer minuteOfDay = localTime.get(MINUTE_OF_DAY);
 
         final String query = String.join("\n"
-                ,
-                 "select * from restaurants"
-                , ""
-                , ""
-                , ""
-                , ""
+                , "SELECT * from restaurants r"
+                , "INNER JOIN open_hours o on o.restaurant_id = r.id"
+                , "WHERE o.day_of_week = ?"
         );
 
-        return runQueryAndParseRestaurants(query, dayOfWeekString, minuteOfDay);
+        String queryAppended = query;
+        if (localTime.equals(LocalTime.MIDNIGHT) || localTime.isAfter(LocalTime.MIDNIGHT)) {
+            queryAppended += "AND o.start_time_minute_of_day > o.end_time_minute_of_day AND o.end_time_minute_of_day > ? ";
+            return runQueryAndParseRestaurants(queryAppended, previousDayOfWeekString, minuteOfDay);
+        } else {
+            queryAppended += " AND o.start_time_minute_of_day < ? and o.end_time_minute_of_day > ?";
+            return runQueryAndParseRestaurants(queryAppended, dayOfWeekString, minuteOfDay, minuteOfDay);
+        }
+
     }
 
     /**
@@ -72,12 +77,10 @@ public class SQLRestaurantService {
 
 
         final String query = String.join("\n"
-                ,
-                " select * from restaurants"
-                , ""
-                , ""
-                , ""
-                , ""
+                , "SELECT r.id, r.name, COUNT(r.id) as CNT from restaurants r"
+                , "INNER JOIN menu_items m on m.restaurant_id = r.id"
+                , "GROUP BY r.id"
+                , "HAVING CNT >= ?"
         );
 
         return runQueryAndParseRestaurants(query, menuSize);

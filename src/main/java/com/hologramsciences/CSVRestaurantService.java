@@ -5,10 +5,10 @@ import java.time.DayOfWeek;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoField;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.commons.csv.CSVRecord;
@@ -57,14 +57,46 @@ public class CSVRestaurantService {
      *
      */
     public static Option<Restaurant> parse(final CSVRecord r) {
-        return Option.none();
+        if (r.size() == 0 || r.size() < 2) { //this is to validate r.get(0) and r.get(1) name and openhours
+            //System.out.println("Error: CSV record is not valid");
+            return Option.none();
+        }
+        Map<DayOfWeek, Restaurant.OpenHours> weeklyOpenHoursMap = parseOpenHour(r.get(1));
+        if (weeklyOpenHoursMap == null || weeklyOpenHoursMap.isEmpty()) {
+            //System.out.println("Error: Failed to parse the records for weekly data");
+            return Option.none();
+        }
+        return Option.some(new Restaurant(r.get(0), weeklyOpenHoursMap));
     }
 
     /**
      * TODO: Implement me, This is a useful helper method
      */
     public static Map<DayOfWeek, Restaurant.OpenHours> parseOpenHour(final String openhoursString) {
-        return Collections.emptyMap();
+        if (openhoursString == null || openhoursString.isEmpty()) {
+           // System.out.println("Error: Can't parse the csv record, empty string");
+            return null;
+        }
+        final Map<DayOfWeek, Restaurant.OpenHours> weeklyOpenHoursMap = new LinkedHashMap<>();
+        final String[] openDays = openhoursString.trim().split(";");
+        for (String day : openDays) {
+            String[] dayAndHours = day.trim().split("\\|");
+            String[] startAndEndTime = dayAndHours[1].trim().split("-");
+            LocalTime startTime = LocalTime.parse(startAndEndTime[0]); //parse start time
+            LocalTime endTime = LocalTime.parse(startAndEndTime[1]);  //parse end time
+            Restaurant.OpenHours openHours = new Restaurant.OpenHours(startTime, endTime);
+            if (!openHours.getStartTime().equals(openHours.getEndTime())) {
+                String[] multiDaysHours = dayAndHours[0].split(",");
+                for (String dayHour : multiDaysHours) {
+                    Option<DayOfWeek> dayOfWeek = getDayOfWeek(dayHour); //to return the whole dayOfWeek String. from "Mon" to "MONDAY"
+                    if (dayOfWeek.isDefined()) {
+                        DayOfWeek ofWeek = dayOfWeek.get();
+                        weeklyOpenHoursMap.put(ofWeek, openHours);
+                    }
+                }
+            }
+        }
+        return weeklyOpenHoursMap;
     }
 
     public CSVRestaurantService() throws IOException {
@@ -101,7 +133,30 @@ public class CSVRestaurantService {
      *
      */
     public List<Restaurant> getOpenRestaurants(final DayOfWeek dayOfWeek, final LocalTime localTime) {
-        return Collections.emptyList();
+        final List<Restaurant> restaurants = getAllRestaurants();
+        if (restaurants == null || restaurants.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return restaurants.stream().filter(restaurant -> isRestaurantOpen(dayOfWeek, localTime, restaurant)).collect(Collectors.toList());
+    }
+
+    private boolean isRestaurantOpen(final DayOfWeek dayOfWeek, final LocalTime localTime, final Restaurant restaurant) {
+        if (!restaurant.getOpenHoursMap().containsKey(dayOfWeek)) {
+            //System.out.println("Error: restaurant is not open");
+            return false;
+        }
+        Restaurant.OpenHours openHours = restaurant.getOpenHoursMap().get(dayOfWeek);
+
+        if (localTime.equals(LocalTime.MIDNIGHT) || localTime.isAfter(LocalTime.MIDNIGHT)) {
+            Restaurant.OpenHours openHoursLastDay = restaurant.getOpenHoursMap().get(dayOfWeek.minus(1));
+            if (openHoursLastDay != null && openHoursLastDay.spansMidnight()) {
+                //System.out.println("Spans midnight");
+                if (openHoursLastDay.getEndTime().isAfter(localTime)) {
+                    return true;
+                }
+            }
+        }
+        return openHours.getStartTime().isBefore(localTime) && openHours.getEndTime().isAfter(localTime);
     }
 
     public List<Restaurant> getOpenRestaurantsForLocalDateTime(final LocalDateTime localDateTime) {
